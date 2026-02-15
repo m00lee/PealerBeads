@@ -326,66 +326,167 @@ export function exportPDF(
     }
   }
 
-  // ---- Legend page ----
+  // ---- Legend: try to fit on the last grid page, otherwise add a new page ----
   if (opts.showLegend && stats.length > 0) {
-    doc.addPage();
-    smartText(doc, 'Color Legend', marginLeft, marginTop, 11, 40, 40, 40);
+    const legendTitleH = 12; // space for title + subtitle
+    const rowH = 5.5; // approx row height in the table (fontSize 7 + padding)
+    const headerH = 7; // table header row
+    const legendNeeded = legendTitleH + headerH + stats.length * rowH + 4;
+
+    // Calculate remaining space on the last grid page
+    // The last page had grid ending at gridY0 + gridH (for the last py/px)
+    const lastPy = pagesY - 1;
+    const lastStartRow = lastPy * rowsPerPage;
+    const lastEndRow = Math.min(lastStartRow + rowsPerPage, M);
+    const lastRowCount = lastEndRow - lastStartRow;
+    const lastGridH = lastRowCount * cellMm;
+    const lastGridY0 = marginTop + titleSpace + labelSpaceTop + (usableH - lastGridH) / 2;
+    const lastGridBottom = lastGridY0 + lastGridH;
+    const remainingOnLastPage = actualPageH - lastGridBottom - marginBottom;
+
+    let legendStartY: number;
+    if (remainingOnLastPage >= legendNeeded) {
+      // Fit legend on the same page — place it below the grid with some gap
+      legendStartY = lastGridBottom + 6;
+    } else {
+      // Not enough space — add a new page
+      doc.addPage();
+      legendStartY = marginTop;
+    }
+
+    smartText(doc, 'Color Legend', marginLeft, legendStartY, 11, 40, 40, 40);
     smartText(
       doc,
       `${opts.title}  |  ${N}x${M}  |  Total: ${stats.reduce((s, c) => s + c.count, 0)}`,
-      marginLeft, marginTop + 6, 7, 100, 100, 100,
+      marginLeft, legendStartY + 6, 7, 100, 100, 100,
     );
 
-    const tableHead = [['Sym', 'Color', 'Code', 'Qty', '%']];
-    const tableBody = stats.map((s) => {
-      const sym = symbolMap.get(s.hex.toUpperCase()) ?? '';
-      const displayKey = getDisplayKey(s.hex, system);
-      return [sym, '', displayKey, String(s.count), `${s.percentage.toFixed(1)}%`];
-    });
+    // Calculate available height for the table
+    const tableStartY = legendStartY + 10;
+    const tableAvailH = actualPageH - tableStartY - marginBottom;
 
-    autoTable(doc, {
-      startY: marginTop + 10,
-      head: tableHead,
-      body: tableBody,
-      theme: 'grid',
-      styles: {
-        fontSize: 7,
-        cellPadding: 1.5,
-        lineColor: [200, 200, 200],
-        lineWidth: 0.1,
-      },
-      headStyles: {
-        fillColor: [60, 60, 60],
-        textColor: [255, 255, 255],
-        fontStyle: 'bold',
-        halign: 'center',
-      },
-      columnStyles: {
-        0: { halign: 'center', cellWidth: 14 },
-        1: { cellWidth: 14 },
-        2: { halign: 'center', cellWidth: 22 },
-        3: { halign: 'right', cellWidth: 18 },
-        4: { halign: 'right', cellWidth: 18 },
-      },
-      didDrawCell: (data: any) => {
-        if (data.section === 'body' && data.column.index === 1) {
-          const rowIdx = data.row.index;
-          if (rowIdx < stats.length) {
-            const hex = stats[rowIdx].hex;
-            const [r, g, b] = hexToRgb(hex);
-            const cDoc = data.doc as jsPDF;
-            cDoc.setFillColor(r, g, b);
-            const pad = 1;
-            cDoc.roundedRect(
-              data.cell.x + pad, data.cell.y + pad,
-              data.cell.width - pad * 2, data.cell.height - pad * 2,
-              1, 1, 'F',
-            );
+    // If space is tight, use multi-column layout
+    const singleColH = headerH + stats.length * rowH;
+    const useMultiCol = singleColH > tableAvailH && stats.length > 6;
+
+    if (useMultiCol) {
+      // Split into 2 or 3 columns side by side
+      const colGap = 4;
+      const availW = actualPageW - marginLeft - marginRight;
+      const numCols = singleColH > tableAvailH * 2 ? 3 : 2;
+      const colW = (availW - colGap * (numCols - 1)) / numCols;
+      const rowsPerCol = Math.ceil(stats.length / numCols);
+
+      for (let ci = 0; ci < numCols; ci++) {
+        const colStats = stats.slice(ci * rowsPerCol, (ci + 1) * rowsPerCol);
+        if (colStats.length === 0) continue;
+        const colX = marginLeft + ci * (colW + colGap);
+
+        const tableHead = [['Sym', 'Color', 'Code', 'Qty', '%']];
+        const tableBody = colStats.map((s) => {
+          const sym = symbolMap.get(s.hex.toUpperCase()) ?? '';
+          const displayKey = getDisplayKey(s.hex, system);
+          return [sym, '', displayKey, String(s.count), `${s.percentage.toFixed(1)}%`];
+        });
+
+        autoTable(doc, {
+          startY: tableStartY,
+          head: tableHead,
+          body: tableBody,
+          theme: 'grid',
+          styles: {
+            fontSize: 6,
+            cellPadding: 1,
+            lineColor: [200, 200, 200],
+            lineWidth: 0.1,
+          },
+          headStyles: {
+            fillColor: [60, 60, 60],
+            textColor: [255, 255, 255],
+            fontStyle: 'bold',
+            halign: 'center',
+          },
+          columnStyles: {
+            0: { halign: 'center', cellWidth: colW * 0.14 },
+            1: { cellWidth: colW * 0.14 },
+            2: { halign: 'center', cellWidth: colW * 0.3 },
+            3: { halign: 'right', cellWidth: colW * 0.2 },
+            4: { halign: 'right', cellWidth: colW * 0.2 },
+          },
+          didDrawCell: (data: any) => {
+            if (data.section === 'body' && data.column.index === 1) {
+              const rowIdx = data.row.index;
+              if (rowIdx < colStats.length) {
+                const hex = colStats[rowIdx].hex;
+                const [r, g, b] = hexToRgb(hex);
+                const cDoc = data.doc as jsPDF;
+                cDoc.setFillColor(r, g, b);
+                const pad = 0.8;
+                cDoc.roundedRect(
+                  data.cell.x + pad, data.cell.y + pad,
+                  data.cell.width - pad * 2, data.cell.height - pad * 2,
+                  0.8, 0.8, 'F',
+                );
+              }
+            }
+          },
+          tableWidth: colW,
+          margin: { left: colX, right: actualPageW - colX - colW },
+        });
+      }
+    } else {
+      // Single column layout (fits or new page)
+      const tableHead = [['Sym', 'Color', 'Code', 'Qty', '%']];
+      const tableBody = stats.map((s) => {
+        const sym = symbolMap.get(s.hex.toUpperCase()) ?? '';
+        const displayKey = getDisplayKey(s.hex, system);
+        return [sym, '', displayKey, String(s.count), `${s.percentage.toFixed(1)}%`];
+      });
+
+      autoTable(doc, {
+        startY: tableStartY,
+        head: tableHead,
+        body: tableBody,
+        theme: 'grid',
+        styles: {
+          fontSize: 7,
+          cellPadding: 1.5,
+          lineColor: [200, 200, 200],
+          lineWidth: 0.1,
+        },
+        headStyles: {
+          fillColor: [60, 60, 60],
+          textColor: [255, 255, 255],
+          fontStyle: 'bold',
+          halign: 'center',
+        },
+        columnStyles: {
+          0: { halign: 'center', cellWidth: 14 },
+          1: { cellWidth: 14 },
+          2: { halign: 'center', cellWidth: 22 },
+          3: { halign: 'right', cellWidth: 18 },
+          4: { halign: 'right', cellWidth: 18 },
+        },
+        didDrawCell: (data: any) => {
+          if (data.section === 'body' && data.column.index === 1) {
+            const rowIdx = data.row.index;
+            if (rowIdx < stats.length) {
+              const hex = stats[rowIdx].hex;
+              const [r, g, b] = hexToRgb(hex);
+              const cDoc = data.doc as jsPDF;
+              cDoc.setFillColor(r, g, b);
+              const pad = 1;
+              cDoc.roundedRect(
+                data.cell.x + pad, data.cell.y + pad,
+                data.cell.width - pad * 2, data.cell.height - pad * 2,
+                1, 1, 'F',
+              );
+            }
           }
-        }
-      },
-      margin: { left: marginLeft, right: marginRight },
-    });
+        },
+        margin: { left: marginLeft, right: marginRight },
+      });
+    }
   }
 
   doc.save(filename || `${opts.title}.pdf`);
