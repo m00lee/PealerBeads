@@ -94,11 +94,33 @@ export type SymmetryMode = 'none' | 'horizontal' | 'vertical' | 'both';
 
 // ---- Preview ----
 
-export type PreviewMode = 'original' | 'pixelated' | 'gridOnly' | 'colorBlock';
+export type PreviewMode = 'original' | 'pixelated' | 'gridOnly' | 'colorBlock' | 'beadView';
 
 // ---- Export ----
 
 export type ExportFormat = 'png' | 'pdf' | 'json' | 'csv';
+
+/** 标准拼豆板尺寸预设 */
+export interface BoardSizePreset {
+  label: string;
+  cols: number;
+  rows: number;
+}
+
+/** 板型堆叠方式 */
+export type BoardStacking = 'standard' | 'hexDense' | 'brick';
+
+/** 规则化导出设置 */
+export interface BoardExportSettings {
+  boardSize: BoardSizePreset;
+  stacking: BoardStacking;
+  showBoardBorders: boolean;
+  showPageNumbers: boolean;
+  showLegend: boolean;
+  cellSize: number;
+  showSymbols: boolean;
+  showGrid: boolean;
+}
 
 export interface ExportSettings {
   format: ExportFormat;

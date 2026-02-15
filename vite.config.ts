@@ -11,7 +11,7 @@ export default defineConfig({
   },
   // Tauri expects a fixed port
   server: {
-    port: 1420,
+    port: 1421,
     strictPort: true,
   },
   // produce relative paths so Tauri can load from disk

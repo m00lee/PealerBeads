@@ -73,6 +73,50 @@ export function findClosestPaletteColor(
   return best;
 }
 
+// ---- Color Lookup Table (CLT) for O(1) approximate nearest-color ----
+
+const CLT_BITS = 5; // quantize each channel to 2^5 = 32 levels
+const CLT_SHIFT = 8 - CLT_BITS;
+const CLT_SIZE = 1 << CLT_BITS;
+
+let _cltPalette: PaletteColor[] | null = null;
+let _cltTable: PaletteColor[] | null = null;
+
+/**
+ * Build a 32×32×32 color lookup table for a palette.
+ * After building, `findClosestPaletteColorFast` runs in O(1).
+ */
+export function buildColorLookupTable(palette: PaletteColor[]): void {
+  if (_cltPalette === palette && _cltTable) return; // already built
+  _cltPalette = palette;
+  _cltTable = new Array(CLT_SIZE * CLT_SIZE * CLT_SIZE);
+  for (let ri = 0; ri < CLT_SIZE; ri++) {
+    const r = (ri << CLT_SHIFT) | ((1 << (CLT_SHIFT - 1)) - 1);
+    for (let gi = 0; gi < CLT_SIZE; gi++) {
+      const g = (gi << CLT_SHIFT) | ((1 << (CLT_SHIFT - 1)) - 1);
+      for (let bi = 0; bi < CLT_SIZE; bi++) {
+        const b = (bi << CLT_SHIFT) | ((1 << (CLT_SHIFT - 1)) - 1);
+        const idx = (ri * CLT_SIZE + gi) * CLT_SIZE + bi;
+        _cltTable[idx] = findClosestPaletteColor({ r, g, b }, palette);
+      }
+    }
+  }
+}
+
+/** O(1) nearest palette color using pre-built lookup table */
+export function findClosestPaletteColorFast(
+  target: RgbColor,
+  palette: PaletteColor[]
+): PaletteColor {
+  if (!_cltTable || _cltPalette !== palette) {
+    buildColorLookupTable(palette);
+  }
+  const ri = target.r >> CLT_SHIFT;
+  const gi = target.g >> CLT_SHIFT;
+  const bi = target.b >> CLT_SHIFT;
+  return _cltTable![(ri * CLT_SIZE + gi) * CLT_SIZE + bi];
+}
+
 // ---- Cell representative color ----
 
 function cellRepresentativeColor(
@@ -165,7 +209,7 @@ export function calculatePixelGrid(
 
       const rgb = cellRepresentativeColor(imageData, sx, sy, w, h, mode);
       if (rgb) {
-        const closest = findClosestPaletteColor(rgb, palette);
+        const closest = findClosestPaletteColorFast(rgb, palette);
         grid[j][i] = { key: closest.key, color: closest.hex };
       } else {
         grid[j][i] = { ...transparentPixel };

@@ -12,18 +12,23 @@
     "tauri:build": "tauri build"
   },
   "dependencies": {
+    "@react-three/drei": "^10.7.7",
+    "@react-three/fiber": "^9.5.0",
+    "@types/three": "^0.182.0",
+    "clsx": "^2.1.1",
+    "jspdf": "^2.5.2",
+    "jspdf-autotable": "^3.8.4",
+    "lucide-react": "^0.474.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "zustand": "^5.0.3",
-    "zundo": "^2.3.0",
-    "clsx": "^2.1.1",
     "tailwind-merge": "^3.0.2",
-    "lucide-react": "^0.474.0",
-    "jspdf": "^2.5.2",
-    "jspdf-autotable": "^3.8.4"
+    "three": "^0.182.0",
+    "zundo": "^2.3.0",
+    "zustand": "^5.0.3"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^1.6.3",
+    "@tauri-apps/cli": "^2.0.0",
+    "@types/node": "^25.2.3",
     "@types/react": "^19.0.8",
     "@types/react-dom": "^19.0.3",
     "@vitejs/plugin-react": "^4.3.4",

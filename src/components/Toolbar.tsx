@@ -13,10 +13,21 @@ import {
   Image as ImageIcon,
   Grid2X2,
   Palette,
+  Box,
+  LayoutGrid,
+  Zap,
 } from 'lucide-react';
 import type { PreviewMode, GridType } from '@/types';
 
-export function Toolbar() {
+export function Toolbar({
+  onShow3D,
+  onShowBoardExport,
+  onShowColorOptimize,
+}: {
+  onShow3D: () => void;
+  onShowBoardExport: () => void;
+  onShowColorOptimize: () => void;
+}) {
   const {
     projectName,
     zoom,
@@ -34,6 +45,7 @@ export function Toolbar() {
 
   const previewModes: { mode: PreviewMode; label: string }[] = [
     { mode: 'pixelated', label: '像素图' },
+    { mode: 'beadView', label: '拼豆' },
     { mode: 'colorBlock', label: '色块' },
     { mode: 'gridOnly', label: '网格' },
     { mode: 'original', label: '原图' },
@@ -51,6 +63,9 @@ export function Toolbar() {
       {/* File Actions */}
       <ToolBtn icon={<Upload size={16} />} tooltip="导入图片" onClick={() => setShowImportModal(true)} />
       <ToolBtn icon={<Download size={16} />} tooltip="导出" onClick={() => setShowExportPanel(true)} />
+      <ToolBtn icon={<LayoutGrid size={16} />} tooltip="板型分割导出" onClick={onShowBoardExport} />
+      <ToolBtn icon={<Box size={16} />} tooltip="3D 预览" onClick={onShow3D} />
+      <ToolBtn icon={<Zap size={16} />} tooltip="颜色优化（合并相近色）" onClick={onShowColorOptimize} />
 
       <div className="w-px h-5 bg-surface-lighter mx-1" />
 

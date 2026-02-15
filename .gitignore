@@ -6,6 +6,12 @@ dist-ssr
 
 # Tauri
 src-tauri/target/
+src-tauri/gen/
+
+# TypeScript build info
+*.tsbuildinfo
+vite.config.d.ts
+vite.config.d.ts.map
 
 # Editor directories and files
 .vscode/*

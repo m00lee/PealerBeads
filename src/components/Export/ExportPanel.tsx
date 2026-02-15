@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useStore } from '@/store/useStore';
 import { renderGridToCanvas, downloadCanvas, exportCSV, exportJSON, assignSymbols } from '@/lib/exportUtils';
+import { exportPDF, type PdfExportOptions } from '@/lib/pdfExport';
 import { X, Image, FileText, FileJson, Table } from 'lucide-react';
 import type { ExportFormat } from '@/types';
 
@@ -19,6 +20,17 @@ export function ExportPanel() {
   const [showGrid, setShowGrid] = useState(true);
   const [showSymbols, setShowSymbols] = useState(false);
   const [cellSize, setCellSize] = useState(20);
+  const [beadMode, setBeadMode] = useState(false);
+
+  // PDF-specific options
+  const [pdfPaperSize, setPdfPaperSize] = useState<'a4' | 'a3' | 'letter'>('a4');
+  const [pdfOrientation, setPdfOrientation] = useState<'portrait' | 'landscape'>('portrait');
+  const [pdfShowLabels, setPdfShowLabels] = useState(true);
+  const [pdfShowSymbols, setPdfShowSymbols] = useState(true);
+  const [pdfShowLegend, setPdfShowLegend] = useState(true);
+  const [pdfShowColors, setPdfShowColors] = useState(true);
+  const [pdfCellSize, setPdfCellSize] = useState(0); // 0 = auto-fit
+  const [pdfBoldEvery, setPdfBoldEvery] = useState<5 | 10>(5);
 
   const stats = getColorStats();
 
@@ -33,6 +45,7 @@ export function ExportPanel() {
           showSymbols,
           symbolMap,
           boldEvery: gridBoldEvery,
+          beadMode,
         });
         downloadCanvas(canvas, `${filename}.png`);
         break;
@@ -43,10 +56,23 @@ export function ExportPanel() {
       case 'json':
         exportJSON(pixels, dims, stats, `${filename}.json`);
         break;
-      case 'pdf':
-        // TODO: jspdf integration
-        alert('PDF 导出功能即将推出');
+      case 'pdf': {
+        const pdfOpts: Partial<PdfExportOptions> = {
+          paperSize: pdfPaperSize,
+          orientation: pdfOrientation,
+          showGrid: true,
+          showSymbols: pdfShowSymbols,
+          showLabels: pdfShowLabels,
+          showLegend: pdfShowLegend,
+          showColorBlocks: pdfShowColors,
+          gridBoldEvery: pdfBoldEvery,
+          startIndex: 1,
+          cellSizeMm: pdfCellSize,
+          title: filename,
+        };
+        exportPDF(pixels, dims, stats, colorSystem, pdfOpts, `${filename}.pdf`);
         break;
+      }
     }
 
     setShowExportPanel(false);
@@ -101,6 +127,15 @@ export function ExportPanel() {
           {format === 'png' && (
             <div className="space-y-2 pt-2">
               <div className="flex items-center justify-between">
+                <span className="text-xs text-text-muted">拼豆珠样式</span>
+                <input
+                  type="checkbox"
+                  checked={beadMode}
+                  onChange={(e) => setBeadMode(e.target.checked)}
+                  className="accent-accent"
+                />
+              </div>
+              <div className="flex items-center justify-between">
                 <span className="text-xs text-text-muted">显示网格线</span>
                 <input
                   type="checkbox"
@@ -129,6 +164,125 @@ export function ExportPanel() {
                   className="w-full accent-accent"
                 />
               </div>
+            </div>
+          )}
+
+          {/* PDF Options */}
+          {format === 'pdf' && (
+            <div className="space-y-2 pt-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-text-muted">纸张大小</span>
+                <select
+                  value={pdfPaperSize}
+                  onChange={(e) => setPdfPaperSize(e.target.value as 'a4' | 'a3' | 'letter')}
+                  className="text-xs bg-surface rounded px-2 py-0.5 text-text border border-surface-lighter"
+                >
+                  <option value="a4">A4</option>
+                  <option value="a3">A3</option>
+                  <option value="letter">Letter</option>
+                </select>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-text-muted">方向</span>
+                <select
+                  value={pdfOrientation}
+                  onChange={(e) => setPdfOrientation(e.target.value as 'portrait' | 'landscape')}
+                  className="text-xs bg-surface rounded px-2 py-0.5 text-text border border-surface-lighter"
+                >
+                  <option value="portrait">纵向</option>
+                  <option value="landscape">横向</option>
+                </select>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-text-muted">自适应页面</span>
+                <input
+                  type="checkbox"
+                  checked={pdfCellSize === 0}
+                  onChange={(e) => setPdfCellSize(e.target.checked ? 0 : 4)}
+                  className="accent-accent"
+                />
+              </div>
+              {pdfCellSize > 0 && (
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-text-muted">格子大小 (mm): {pdfCellSize}</span>
+                  <input
+                    type="range"
+                    min={2}
+                    max={10}
+                    step={0.5}
+                    value={pdfCellSize}
+                    onChange={(e) => setPdfCellSize(Number(e.target.value))}
+                    className="w-24 accent-accent"
+                  />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-text-muted">加粗间隔</span>
+                <select
+                  value={pdfBoldEvery}
+                  onChange={(e) => setPdfBoldEvery(Number(e.target.value) as 5 | 10)}
+                  className="text-xs bg-surface rounded px-2 py-0.5 text-text border border-surface-lighter"
+                >
+                  <option value={5}>每 5 格</option>
+                  <option value={10}>每 10 格</option>
+                </select>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-text-muted">行列标号 (A, B, C...)</span>
+                <input
+                  type="checkbox"
+                  checked={pdfShowLabels}
+                  onChange={(e) => setPdfShowLabels(e.target.checked)}
+                  className="accent-accent"
+                />
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-text-muted">显示符号</span>
+                <input
+                  type="checkbox"
+                  checked={pdfShowSymbols}
+                  onChange={(e) => setPdfShowSymbols(e.target.checked)}
+                  className="accent-accent"
+                />
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-text-muted">填充颜色</span>
+                <input
+                  type="checkbox"
+                  checked={pdfShowColors}
+                  onChange={(e) => setPdfShowColors(e.target.checked)}
+                  className="accent-accent"
+                />
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-text-muted">颜色图例页</span>
+                <input
+                  type="checkbox"
+                  checked={pdfShowLegend}
+                  onChange={(e) => setPdfShowLegend(e.target.checked)}
+                  className="accent-accent"
+                />
+              </div>
+              {/* Page count estimate */}
+              {(() => {
+                const paper = pdfPaperSize === 'a4' ? { w: 210, h: 297 } : pdfPaperSize === 'a3' ? { w: 297, h: 420 } : { w: 215.9, h: 279.4 };
+                const pw = pdfOrientation === 'landscape' ? paper.h : paper.w;
+                const ph = pdfOrientation === 'landscape' ? paper.w : paper.h;
+                const uw = pw - 20 - (pdfShowLabels ? 10 : 0);
+                const uh = ph - 32 - (pdfShowLabels ? 8 : 0);
+                let cs = pdfCellSize;
+                if (cs <= 0) {
+                  cs = Math.max(0.5, Math.min(uw / dims.N, uh / dims.M, 15));
+                }
+                const cols = Math.min(dims.N, Math.floor(uw / cs));
+                const rows = Math.min(dims.M, Math.floor(uh / cs));
+                const pages = Math.ceil(dims.N / cols) * Math.ceil(dims.M / rows) + (pdfShowLegend ? 1 : 0);
+                return (
+                  <div className="text-[10px] text-text-dim">
+                    {pdfCellSize === 0 ? '自适应' : `${cs}mm`} | 预计 {pages} 页 (每页 {cols}×{rows} 格)
+                  </div>
+                );
+              })()}
             </div>
           )}
 

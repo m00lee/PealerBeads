@@ -57,7 +57,7 @@ export function getAllHexValues(): string[] {
   return Object.keys(mapping);
 }
 
-/** Sort colors by hue for display */
+/** Sort colors by hue for display (Schwartzian transform: pre-compute HSL) */
 export function sortByHue<T extends { hex: string }>(colors: T[]): T[] {
   function toHsl(hex: string) {
     const h = hex.replace('#', '');
@@ -82,11 +82,12 @@ export function sortByHue<T extends { hex: string }>(colors: T[]): T[] {
     return { h: hue * 360, s: s * 100, l: l * 100 };
   }
 
-  return colors.slice().sort((a, b) => {
-    const ha = toHsl(a.hex);
-    const hb = toHsl(b.hex);
-    if (Math.abs(ha.h - hb.h) > 5) return ha.h - hb.h;
-    if (Math.abs(ha.l - hb.l) > 3) return hb.l - ha.l;
-    return hb.s - ha.s;
+  // Pre-compute HSL values for each color
+  const decorated = colors.map((c) => ({ item: c, hsl: toHsl(c.hex) }));
+  decorated.sort((a, b) => {
+    if (Math.abs(a.hsl.h - b.hsl.h) > 5) return a.hsl.h - b.hsl.h;
+    if (Math.abs(a.hsl.l - b.hsl.l) > 3) return b.hsl.l - a.hsl.l;
+    return b.hsl.s - a.hsl.s;
   });
+  return decorated.map((d) => d.item);
 }

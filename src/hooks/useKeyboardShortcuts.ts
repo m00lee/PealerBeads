@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useStore, useTemporalStore } from '@/store/useStore';
 import type { ToolType } from '@/types';
 
@@ -12,6 +12,10 @@ export function useKeyboardShortcuts() {
     zoom,
   } = useStore();
   const { undo, redo } = useTemporalStore();
+
+  // Use ref to avoid re-registering the handler when zoom changes
+  const zoomRef = useRef(zoom);
+  zoomRef.current = zoom;
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -53,13 +57,13 @@ export function useKeyboardShortcuts() {
       // Ctrl+= → Zoom in
       if (ctrl && (e.key === '=' || e.key === '+')) {
         e.preventDefault();
-        setZoom(zoom * 1.2);
+        setZoom(zoomRef.current * 1.2);
         return;
       }
       // Ctrl+- → Zoom out
       if (ctrl && e.key === '-') {
         e.preventDefault();
-        setZoom(zoom / 1.2);
+        setZoom(zoomRef.current / 1.2);
         return;
       }
       // Ctrl+0 → Reset zoom
@@ -92,5 +96,5 @@ export function useKeyboardShortcuts() {
 
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [undo, redo, setActiveTool, setShowImportModal, setShowExportPanel, setZoom, zoom]);
+  }, [undo, redo, setActiveTool, setShowImportModal, setShowExportPanel, setZoom]);
 }

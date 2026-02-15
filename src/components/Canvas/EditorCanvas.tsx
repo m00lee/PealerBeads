@@ -1,7 +1,7 @@
 import { useRef, useEffect, useCallback, useState, useMemo } from 'react';
 import { useStore } from '@/store/useStore';
-import { TRANSPARENT_KEY, floodFill, paintPixel, floodFillErase } from '@/lib/pixelEditing';
-import { drawHexPath, hexCellCenter } from '@/lib/canvasUtils';
+import { TRANSPARENT_KEY, floodFill, paintPixel, floodFillErase, linePixels, rectPixels, circlePixels, paintCells } from '@/lib/pixelEditing';
+import { drawHexPath, hexCellCenter, drawBead } from '@/lib/canvasUtils';
 import type { MappedPixel, GridDimensions, ToolType } from '@/types';
 
 /** Multi-layer canvas editor with zoom/pan support */
@@ -35,9 +35,28 @@ export function EditorCanvas() {
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState<{ x: number; y: number } | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
+  const [shapeStart, setShapeStart] = useState<{ col: number; row: number } | null>(null);
 
   // Compute cell size from container
   const cellSize = 16; // base cell size in world units
+
+  // ---- Refs for values that change frequently to avoid callback re-creation ----
+  const pixelsRef = useRef(pixels);
+  pixelsRef.current = pixels;
+  const zoomRef = useRef(zoom);
+  zoomRef.current = zoom;
+  const panOffsetRef = useRef(panOffset);
+  panOffsetRef.current = panOffset;
+  const activeToolRef = useRef(activeTool);
+  activeToolRef.current = activeTool;
+  const selectedColorRef = useRef(selectedColor);
+  selectedColorRef.current = selectedColor;
+  const brushSizeRef = useRef(brushSize);
+  brushSizeRef.current = brushSize;
+  const symmetryRef = useRef(symmetry);
+  symmetryRef.current = symmetry;
+  const shapeStartRef = useRef(shapeStart);
+  shapeStartRef.current = shapeStart;
 
   // ---- Draw the static grid layer ----
   const drawGrid = useCallback(() => {
@@ -104,23 +123,28 @@ export function EditorCanvas() {
 
     if (!hoverCell) return;
 
+    const currentZoom = zoomRef.current;
+    const currentPanOffset = panOffsetRef.current;
+    const currentTool = activeToolRef.current;
+    const currentBrushSize = brushSizeRef.current;
+
     ctx.save();
-    ctx.translate(panOffset.x, panOffset.y);
-    ctx.scale(zoom, zoom);
+    ctx.translate(currentPanOffset.x, currentPanOffset.y);
+    ctx.scale(currentZoom, currentZoom);
 
     const { col, row } = hoverCell;
 
     if (gridType === 'square') {
       // Draw hover highlight
       ctx.strokeStyle = '#89b4fa';
-      ctx.lineWidth = 2 / zoom;
+      ctx.lineWidth = 2 / currentZoom;
       ctx.strokeRect(col * cellSize, row * cellSize, cellSize, cellSize);
 
       // Draw brush preview
-      if (brushSize > 1 && (activeTool === 'pencil' || activeTool === 'eraser')) {
+      if (currentBrushSize > 1 && (currentTool === 'pencil' || currentTool === 'eraser')) {
         ctx.strokeStyle = 'rgba(137, 180, 250, 0.4)';
-        ctx.lineWidth = 1 / zoom;
-        const half = Math.floor(brushSize / 2);
+        ctx.lineWidth = 1 / currentZoom;
+        const half = Math.floor(currentBrushSize / 2);
         for (let dy = -half; dy <= half; dy++) {
           for (let dx = -half; dx <= half; dx++) {
             const c = col + dx;
@@ -131,17 +155,39 @@ export function EditorCanvas() {
           }
         }
       }
+
+      // Draw shape preview during drag
+      const currentShapeStart = shapeStartRef.current;
+      if (currentShapeStart && (currentTool === 'line' || currentTool === 'rect' || currentTool === 'circle')) {
+        let shapeCells: { col: number; row: number }[] = [];
+        if (currentTool === 'line') {
+          shapeCells = linePixels(currentShapeStart.col, currentShapeStart.row, col, row);
+        } else if (currentTool === 'rect') {
+          shapeCells = rectPixels(currentShapeStart.col, currentShapeStart.row, col, row, false);
+        } else if (currentTool === 'circle') {
+          const dx2 = col - currentShapeStart.col;
+          const dy2 = row - currentShapeStart.row;
+          const radius = Math.round(Math.sqrt(dx2 * dx2 + dy2 * dy2));
+          shapeCells = circlePixels(currentShapeStart.col, currentShapeStart.row, radius, false);
+        }
+        ctx.fillStyle = 'rgba(137, 180, 250, 0.3)';
+        for (const sc of shapeCells) {
+          if (sc.col >= 0 && sc.col < dims.N && sc.row >= 0 && sc.row < dims.M) {
+            ctx.fillRect(sc.col * cellSize, sc.row * cellSize, cellSize, cellSize);
+          }
+        }
+      }
     } else {
       // Hex hover
       const center = hexCellCenter(col, row, cellSize * 0.6);
       drawHexPath(ctx, center.x, center.y, cellSize * 0.6);
       ctx.strokeStyle = '#89b4fa';
-      ctx.lineWidth = 2 / zoom;
+      ctx.lineWidth = 2 / currentZoom;
       ctx.stroke();
     }
 
     ctx.restore();
-  }, [hoverCell, zoom, panOffset, dims, gridType, cellSize, brushSize, activeTool]);
+  }, [hoverCell, dims, gridType, cellSize]);
 
   // ---- Effects to redraw ----
   useEffect(() => { drawGrid(); }, [drawGrid]);
@@ -159,7 +205,7 @@ export function EditorCanvas() {
     return () => ro.disconnect();
   }, [drawGrid, drawInteraction]);
 
-  // ---- Mouse → grid coords ----
+  // ---- Mouse → grid coords (stable callback using refs) ----
   const getGridCell = useCallback(
     (clientX: number, clientY: number) => {
       const container = containerRef.current;
@@ -167,8 +213,10 @@ export function EditorCanvas() {
       const rect = container.getBoundingClientRect();
       const cx = clientX - rect.left;
       const cy = clientY - rect.top;
-      const worldX = (cx - panOffset.x) / zoom;
-      const worldY = (cy - panOffset.y) / zoom;
+      const currentZoom = zoomRef.current;
+      const currentPanOffset = panOffsetRef.current;
+      const worldX = (cx - currentPanOffset.x) / currentZoom;
+      const worldY = (cy - currentPanOffset.y) / currentZoom;
 
       if (gridType === 'square') {
         const col = Math.floor(worldX / cellSize);
@@ -191,17 +239,22 @@ export function EditorCanvas() {
       }
       return null;
     },
-    [panOffset, zoom, dims, gridType, cellSize]
+    [dims, gridType, cellSize]
   );
 
-  // ---- Apply tool at cell ----
+  // ---- Apply tool at cell (stable callback using refs) ----
   const applyTool = useCallback(
     (col: number, row: number, tool: ToolType) => {
-      if (tool === 'pencil' && selectedColor) {
-        const value: MappedPixel = { key: selectedColor.key, color: selectedColor.hex, isExternal: false };
+      const currentPixels = pixelsRef.current;
+      const currentSelectedColor = selectedColorRef.current;
+      const currentBrushSize = brushSizeRef.current;
+      const currentSymmetry = symmetryRef.current;
+
+      if (tool === 'pencil' && currentSelectedColor) {
+        const value: MappedPixel = { key: currentSelectedColor.key, color: currentSelectedColor.hex, isExternal: false };
         // Apply with brush size
-        const half = Math.floor(brushSize / 2);
-        let current = pixels;
+        const half = Math.floor(currentBrushSize / 2);
+        let current = currentPixels;
         for (let dy = -half; dy <= half; dy++) {
           for (let dx = -half; dx <= half; dx++) {
             const r = row + dy;
@@ -213,7 +266,7 @@ export function EditorCanvas() {
           }
         }
         // Symmetry
-        if (symmetry === 'horizontal' || symmetry === 'both') {
+        if (currentSymmetry === 'horizontal' || currentSymmetry === 'both') {
           const mirrorCol = dims.N - 1 - col;
           for (let dy = -half; dy <= half; dy++) {
             for (let dx = -half; dx <= half; dx++) {
@@ -226,7 +279,7 @@ export function EditorCanvas() {
             }
           }
         }
-        if (symmetry === 'vertical' || symmetry === 'both') {
+        if (currentSymmetry === 'vertical' || currentSymmetry === 'both') {
           const mirrorRow = dims.M - 1 - row;
           for (let dy = -half; dy <= half; dy++) {
             for (let dx = -half; dx <= half; dx++) {
@@ -239,11 +292,11 @@ export function EditorCanvas() {
             }
           }
         }
-        if (current !== pixels) setPixels(current);
+        if (current !== currentPixels) setPixels(current);
       } else if (tool === 'eraser') {
         const transparent: MappedPixel = { key: TRANSPARENT_KEY, color: '#FFFFFF', isExternal: true };
-        const half = Math.floor(brushSize / 2);
-        let current = pixels;
+        const half = Math.floor(currentBrushSize / 2);
+        let current = currentPixels;
         for (let dy = -half; dy <= half; dy++) {
           for (let dx = -half; dx <= half; dx++) {
             const r = row + dy;
@@ -254,65 +307,118 @@ export function EditorCanvas() {
             }
           }
         }
-        if (current !== pixels) setPixels(current);
-      } else if (tool === 'fill' && selectedColor) {
-        const value: MappedPixel = { key: selectedColor.key, color: selectedColor.hex, isExternal: false };
-        const next = floodFill(pixels, dims, row, col, value);
+        if (current !== currentPixels) setPixels(current);
+      } else if (tool === 'fill' && currentSelectedColor) {
+        const value: MappedPixel = { key: currentSelectedColor.key, color: currentSelectedColor.hex, isExternal: false };
+        const next = floodFill(currentPixels, dims, row, col, value);
         setPixels(next);
       } else if (tool === 'eyedropper') {
-        const cell = pixels[row]?.[col];
+        const cell = currentPixels[row]?.[col];
         if (cell && !cell.isExternal) {
           const match = palette.find((p) => p.hex.toUpperCase() === cell.color.toUpperCase());
           if (match) setSelectedColor(match);
         }
       }
     },
-    [pixels, dims, selectedColor, brushSize, symmetry, setPixels, palette, setSelectedColor]
+    [dims, setPixels, palette, setSelectedColor]
   );
 
-  // ---- Mouse handlers ----
+  // ---- Mouse handlers (stable using refs) ----
+  const isPanningRef = useRef(false);
+  const panStartRef = useRef<{ x: number; y: number } | null>(null);
+  const isDrawingRef = useRef(false);
+
   const handleMouseDown = useCallback(
     (e: React.MouseEvent) => {
-      if (e.button === 1 || (e.button === 0 && activeTool === 'move')) {
+      const currentTool = activeToolRef.current;
+      const currentPanOffset = panOffsetRef.current;
+
+      if (e.button === 1 || (e.button === 0 && currentTool === 'move')) {
         // Middle-click or move tool → start panning
+        isPanningRef.current = true;
         setIsPanning(true);
-        setPanStart({ x: e.clientX - panOffset.x, y: e.clientY - panOffset.y });
+        panStartRef.current = { x: e.clientX - currentPanOffset.x, y: e.clientY - currentPanOffset.y };
+        setPanStart(panStartRef.current);
         return;
       }
 
       if (e.button === 0) {
         const cell = getGridCell(e.clientX, e.clientY);
         if (cell) {
-          setIsDrawing(true);
-          applyTool(cell.col, cell.row, activeTool);
+          // Shape tools: record start point, don't draw yet
+          if (currentTool === 'line' || currentTool === 'rect' || currentTool === 'circle') {
+            shapeStartRef.current = cell;
+            setShapeStart(cell);
+            isDrawingRef.current = true;
+            setIsDrawing(true);
+          } else {
+            isDrawingRef.current = true;
+            setIsDrawing(true);
+            applyTool(cell.col, cell.row, currentTool);
+          }
         }
       }
     },
-    [activeTool, panOffset, getGridCell, applyTool]
+    [getGridCell, applyTool]
   );
 
   const handleMouseMove = useCallback(
     (e: React.MouseEvent) => {
-      if (isPanning && panStart) {
-        setPanOffset({ x: e.clientX - panStart.x, y: e.clientY - panStart.y });
+      if (isPanningRef.current && panStartRef.current) {
+        const newOffset = { x: e.clientX - panStartRef.current.x, y: e.clientY - panStartRef.current.y };
+        setPanOffset(newOffset);
         return;
       }
 
       const cell = getGridCell(e.clientX, e.clientY);
       setHoverCell(cell);
 
-      if (isDrawing && cell && (activeTool === 'pencil' || activeTool === 'eraser')) {
-        applyTool(cell.col, cell.row, activeTool);
+      const currentTool = activeToolRef.current;
+      if (isDrawingRef.current && cell && (currentTool === 'pencil' || currentTool === 'eraser')) {
+        applyTool(cell.col, cell.row, currentTool);
       }
+      // For shape tools, just update hoverCell — the interaction layer will render the preview
     },
-    [isPanning, panStart, isDrawing, activeTool, getGridCell, applyTool, setPanOffset]
+    [getGridCell, applyTool, setPanOffset]
   );
 
-  const handleMouseUp = useCallback(() => {
+  const handleMouseUp = useCallback((e: React.MouseEvent) => {
+    // Finalize shape drawing
+    const currentTool = activeToolRef.current;
+    const startCell = shapeStartRef.current;
+    if (isDrawingRef.current && startCell && (currentTool === 'line' || currentTool === 'rect' || currentTool === 'circle')) {
+      const endCell = getGridCell(e.clientX, e.clientY);
+      if (endCell) {
+        const currentSelectedColor = selectedColorRef.current;
+        if (currentSelectedColor) {
+          const value: MappedPixel = { key: currentSelectedColor.key, color: currentSelectedColor.hex, isExternal: false };
+          let shapeCells: { col: number; row: number }[] = [];
+          if (currentTool === 'line') {
+            shapeCells = linePixels(startCell.col, startCell.row, endCell.col, endCell.row);
+          } else if (currentTool === 'rect') {
+            shapeCells = rectPixels(startCell.col, startCell.row, endCell.col, endCell.row, false);
+          } else if (currentTool === 'circle') {
+            const dx = endCell.col - startCell.col;
+            const dy = endCell.row - startCell.row;
+            const radius = Math.round(Math.sqrt(dx * dx + dy * dy));
+            shapeCells = circlePixels(startCell.col, startCell.row, radius, false);
+          }
+          const currentPixels = pixelsRef.current;
+          const next = paintCells(currentPixels, dims, shapeCells, value);
+          if (next !== currentPixels) setPixels(next);
+        }
+      }
+    }
+
+    isPanningRef.current = false;
+    panStartRef.current = null;
+    isDrawingRef.current = false;
+    shapeStartRef.current = null;
     setIsPanning(false);
     setPanStart(null);
     setIsDrawing(false);
-  }, []);
+    setShapeStart(null);
+  }, [getGridCell, dims, setPixels]);
 
   const handleWheel = useCallback(
     (e: React.WheelEvent) => {
@@ -324,19 +430,22 @@ export function EditorCanvas() {
       const mx = e.clientX - rect.left;
       const my = e.clientY - rect.top;
 
+      const currentZoom = zoomRef.current;
+      const currentPanOffset = panOffsetRef.current;
+
       const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
-      const newZoom = Math.max(0.1, Math.min(20, zoom * factor));
+      const newZoom = Math.max(0.1, Math.min(20, currentZoom * factor));
 
       // Zoom towards mouse position
-      const wx = (mx - panOffset.x) / zoom;
-      const wy = (my - panOffset.y) / zoom;
+      const wx = (mx - currentPanOffset.x) / currentZoom;
+      const wy = (my - currentPanOffset.y) / currentZoom;
       setPanOffset({
         x: mx - wx * newZoom,
         y: my - wy * newZoom,
       });
       setZoom(newZoom);
     },
-    [zoom, panOffset, setZoom, setPanOffset]
+    [setZoom, setPanOffset]
   );
 
   // ---- Cursor style ----
@@ -358,7 +467,17 @@ export function EditorCanvas() {
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
-      onMouseLeave={handleMouseUp}
+      onMouseLeave={() => {
+        isPanningRef.current = false;
+        panStartRef.current = null;
+        isDrawingRef.current = false;
+        shapeStartRef.current = null;
+        setIsPanning(false);
+        setPanStart(null);
+        setIsDrawing(false);
+        setShapeStart(null);
+        setHoverCell(null);
+      }}
       onWheel={handleWheel}
       onContextMenu={(e) => e.preventDefault()}
     >
@@ -399,26 +518,55 @@ function drawSquareGrid(
   previewMode: string
 ) {
   const { N, M } = dims;
+  const isBeadView = previewMode === 'beadView';
 
-  // Draw cells
-  for (let j = 0; j < M; j++) {
-    for (let i = 0; i < N; i++) {
-      const cell = pixels[j]?.[i];
-      if (previewMode === 'gridOnly') {
-        ctx.fillStyle = '#1e1e2e';
-      } else if (cell && !cell.isExternal && cell.key !== TRANSPARENT_KEY) {
-        ctx.fillStyle = cell.color;
-      } else {
-        // Transparent checkerboard pattern
-        const isEven = (i + j) % 2 === 0;
-        ctx.fillStyle = isEven ? '#2a2a3c' : '#252536';
+  // Draw background for bead view
+  if (isBeadView) {
+    ctx.fillStyle = '#e8e0d4';
+    ctx.fillRect(0, 0, N * cellSize, M * cellSize);
+
+    // Draw pegboard dots
+    ctx.fillStyle = '#d4ccc0';
+    for (let j = 0; j < M; j++) {
+      for (let i = 0; i < N; i++) {
+        const cx = i * cellSize + cellSize / 2;
+        const cy = j * cellSize + cellSize / 2;
+        ctx.beginPath();
+        ctx.arc(cx, cy, cellSize * 0.06, 0, Math.PI * 2);
+        ctx.fill();
       }
-      ctx.fillRect(i * cellSize, j * cellSize, cellSize, cellSize);
     }
   }
 
-  // Draw grid lines
-  if (showGrid) {
+  // Draw cells / beads
+  for (let j = 0; j < M; j++) {
+    for (let i = 0; i < N; i++) {
+      const cell = pixels[j]?.[i];
+
+      if (isBeadView) {
+        // Bead rendering: only draw beads for non-transparent cells
+        if (cell && !cell.isExternal && cell.key !== TRANSPARENT_KEY) {
+          const cx = i * cellSize + cellSize / 2;
+          const cy = j * cellSize + cellSize / 2;
+          drawBead(ctx, cx, cy, cellSize / 2, cell.color);
+        }
+      } else {
+        // Standard flat rendering
+        if (previewMode === 'gridOnly') {
+          ctx.fillStyle = '#1e1e2e';
+        } else if (cell && !cell.isExternal && cell.key !== TRANSPARENT_KEY) {
+          ctx.fillStyle = cell.color;
+        } else {
+          const isEven = (i + j) % 2 === 0;
+          ctx.fillStyle = isEven ? '#2a2a3c' : '#252536';
+        }
+        ctx.fillRect(i * cellSize, j * cellSize, cellSize, cellSize);
+      }
+    }
+  }
+
+  // Draw grid lines (skip for bead view — beads have their own outlines)
+  if (showGrid && !isBeadView) {
     for (let i = 0; i <= N; i++) {
       const isBold = i % boldEvery === 0;
       ctx.strokeStyle = isBold ? 'rgba(205, 214, 244, 0.3)' : 'rgba(205, 214, 244, 0.08)';

@@ -90,7 +90,9 @@ export interface AppState extends TrackedState {
   setShowImportModal: (v: boolean) => void;
   setShowExportPanel: (v: boolean) => void;
 
-  // -- Computed helpers --
+  // -- Computed helpers (internal cache) --
+  _cachedColorStats: ColorStat[] | null;
+  _cachedStatsPixelsRef: MappedPixel[][] | null;
   getColorStats: () => ColorStat[];
 }
 
@@ -202,9 +204,15 @@ export const useStore = create<AppState>()(
       setShowImportModal: (v) => set({ showImportModal: v }),
       setShowExportPanel: (v) => set({ showExportPanel: v }),
 
-      // -- Computed --
+      // -- Computed (cached) --
+      _cachedColorStats: null as ColorStat[] | null,
+      _cachedStatsPixelsRef: null as MappedPixel[][] | null,
       getColorStats: () => {
-        const { pixels } = get();
+        const { pixels, _cachedColorStats, _cachedStatsPixelsRef } = get();
+        // Return cached stats if pixels haven't changed (reference equality)
+        if (_cachedColorStats && _cachedStatsPixelsRef === pixels) {
+          return _cachedColorStats;
+        }
         const counts = new Map<string, { hex: string; key: string; count: number }>();
         let total = 0;
         for (const row of pixels) {
@@ -221,10 +229,13 @@ export const useStore = create<AppState>()(
             }
           }
         }
-        return Array.from(counts.values()).map((c) => ({
+        const stats = Array.from(counts.values()).map((c) => ({
           ...c,
           percentage: total > 0 ? (c.count / total) * 100 : 0,
         }));
+        // Cache the result
+        set({ _cachedColorStats: stats, _cachedStatsPixelsRef: pixels } as Partial<AppState>);
+        return stats;
       },
     }),
     {

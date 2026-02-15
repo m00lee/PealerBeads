@@ -3,7 +3,7 @@
 // ============================================================
 
 import type { RgbColor, PaletteColor } from '@/types';
-import { findClosestPaletteColor, hexToRgb } from './pixelation';
+import { findClosestPaletteColorFast, buildColorLookupTable } from './pixelation';
 
 /**
  * Floyd–Steinberg dithering applied to a pixel buffer.
@@ -17,25 +17,39 @@ export function floydSteinbergDither(
   palette: PaletteColor[],
   strength: number = 1.0
 ): PaletteColor[][] {
-  // Clone data to avoid mutating input
-  const data = new Float32Array(imageData.data.length);
-  for (let i = 0; i < imageData.data.length; i++) data[i] = imageData.data[i];
+  // Pre-build fast lookup table
+  buildColorLookupTable(palette);
+
+  // Use rolling 2-row buffer instead of cloning the entire image
+  const rowBytes = width * 4;
+  const data = imageData.data;
+  // Current and next row error buffers
+  let currErr = new Float32Array(rowBytes);
+  let nextErr = new Float32Array(rowBytes);
 
   const result: PaletteColor[][] = Array.from({ length: height }, () =>
     Array.from({ length: width }, () => palette[0])
   );
 
   for (let y = 0; y < height; y++) {
+    // Reset next row error buffer
+    nextErr.fill(0);
+
     for (let x = 0; x < width; x++) {
       const idx = (y * width + x) * 4;
+      const ex = x * 4;
       if (data[idx + 3] < 128) continue; // skip transparent
 
-      const oldR = data[idx];
-      const oldG = data[idx + 1];
-      const oldB = data[idx + 2];
+      const oldR = data[idx] + currErr[ex];
+      const oldG = data[idx + 1] + currErr[ex + 1];
+      const oldB = data[idx + 2] + currErr[ex + 2];
 
-      const closest = findClosestPaletteColor(
-        { r: Math.round(oldR), g: Math.round(oldG), b: Math.round(oldB) },
+      const closest = findClosestPaletteColorFast(
+        {
+          r: Math.max(0, Math.min(255, Math.round(oldR))),
+          g: Math.max(0, Math.min(255, Math.round(oldG))),
+          b: Math.max(0, Math.min(255, Math.round(oldB))),
+        },
         palette
       );
       result[y][x] = closest;
@@ -45,23 +59,38 @@ export function floydSteinbergDither(
       const errG = (oldG - closest.rgb.g) * strength;
       const errB = (oldB - closest.rgb.b) * strength;
 
-      // Distribute error to neighbors
-      const distribute = (dx: number, dy: number, factor: number) => {
-        const nx = x + dx;
-        const ny = y + dy;
-        if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
-          const ni = (ny * width + nx) * 4;
-          data[ni] += errR * factor;
-          data[ni + 1] += errG * factor;
-          data[ni + 2] += errB * factor;
+      // Distribute error to neighbors using rolling buffers
+      if (x + 1 < width) {
+        const nx = (x + 1) * 4;
+        currErr[nx]     += errR * (7 / 16);
+        currErr[nx + 1] += errG * (7 / 16);
+        currErr[nx + 2] += errB * (7 / 16);
+      }
+      if (y + 1 < height) {
+        if (x > 0) {
+          const nx = (x - 1) * 4;
+          nextErr[nx]     += errR * (3 / 16);
+          nextErr[nx + 1] += errG * (3 / 16);
+          nextErr[nx + 2] += errB * (3 / 16);
         }
-      };
-
-      distribute(1, 0, 7 / 16);
-      distribute(-1, 1, 3 / 16);
-      distribute(0, 1, 5 / 16);
-      distribute(1, 1, 1 / 16);
+        {
+          nextErr[ex]     += errR * (5 / 16);
+          nextErr[ex + 1] += errG * (5 / 16);
+          nextErr[ex + 2] += errB * (5 / 16);
+        }
+        if (x + 1 < width) {
+          const nx = (x + 1) * 4;
+          nextErr[nx]     += errR * (1 / 16);
+          nextErr[nx + 1] += errG * (1 / 16);
+          nextErr[nx + 2] += errB * (1 / 16);
+        }
+      }
     }
+
+    // Swap buffers
+    const tmp = currErr;
+    currErr = nextErr;
+    nextErr = tmp;
   }
 
   return result;
@@ -78,6 +107,9 @@ export function bayerDither(
   palette: PaletteColor[],
   strength: number = 1.0
 ): PaletteColor[][] {
+  // Pre-build fast lookup table
+  buildColorLookupTable(palette);
+
   // 4×4 Bayer matrix normalized to [-0.5, 0.5]
   const bayer4 = [
     [0, 8, 2, 10],
@@ -101,7 +133,7 @@ export function bayerDither(
       const g = Math.max(0, Math.min(255, data[idx + 1] + bayerVal));
       const b = Math.max(0, Math.min(255, data[idx + 2] + bayerVal));
 
-      result[y][x] = findClosestPaletteColor({ r: Math.round(r), g: Math.round(g), b: Math.round(b) }, palette);
+      result[y][x] = findClosestPaletteColorFast({ r: Math.round(r), g: Math.round(g), b: Math.round(b) }, palette);
     }
   }
 
