@@ -20,6 +20,7 @@ export function RightSidebar() {
     gridDimensions,
     setGridDimensions,
     initGrid,
+    rePixelate,
     showExportPanel,
     setShowExportPanel,
     getColorStats,
@@ -56,7 +57,7 @@ export function RightSidebar() {
             ditherAlgorithm={ditherAlgorithm}
             ditherStrength={ditherStrength}
             gridBoldEvery={gridBoldEvery}
-            onChangeGrid={(d) => { setGridDimensions(d); initGrid(d); }}
+            onChangeGrid={(d) => { rePixelate(d); }}
             onChangeSystem={setColorSystem}
             onChangePixelation={setPixelationMode}
             onChangeDither={setDitherAlgorithm}

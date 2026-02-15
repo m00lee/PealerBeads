@@ -15,6 +15,8 @@ import {
 } from '@/types';
 import { buildPalette } from '@/lib/colorSystem';
 import { TRANSPARENT_KEY, transparentPixel } from '@/lib/pixelEditing';
+import { calculatePixelGrid } from '@/lib/pixelation';
+import { floydSteinbergDither, bayerDither } from '@/lib/dithering';
 
 // ----- Tracked State (undo-able) -----
 export interface TrackedState {
@@ -83,6 +85,7 @@ export interface AppState extends TrackedState {
   sourceImageData: ImageData | null;
   setSourceImage: (img: HTMLImageElement | null) => void;
   setSourceImageData: (d: ImageData | null) => void;
+  rePixelate: (dims: GridDimensions) => void;
 
   // -- UI --
   showImportModal: boolean;
@@ -197,6 +200,43 @@ export const useStore = create<AppState>()(
       sourceImageData: null,
       setSourceImage: (img) => set({ sourceImage: img }),
       setSourceImageData: (d) => set({ sourceImageData: d }),
+      rePixelate: (dims) => {
+        const { sourceImageData, palette, pixelationMode, ditherAlgorithm, ditherStrength } = get();
+        if (!sourceImageData) {
+          // No source image — just create empty grid
+          set({ gridDimensions: dims, pixels: createEmptyGrid(dims) });
+          return;
+        }
+        const cw = sourceImageData.width;
+        const ch = sourceImageData.height;
+        let resultPixels;
+        if (ditherAlgorithm !== 'none') {
+          const resizeCanvas = document.createElement('canvas');
+          resizeCanvas.width = dims.N;
+          resizeCanvas.height = dims.M;
+          const resizeCtx = resizeCanvas.getContext('2d')!;
+          // Draw sourceImageData onto a temp canvas first
+          const srcCanvas = document.createElement('canvas');
+          srcCanvas.width = cw;
+          srcCanvas.height = ch;
+          srcCanvas.getContext('2d')!.putImageData(sourceImageData, 0, 0);
+          resizeCtx.drawImage(srcCanvas, 0, 0, dims.N, dims.M);
+          const resizedData = resizeCtx.getImageData(0, 0, dims.N, dims.M);
+          const ditherFn = ditherAlgorithm === 'floyd-steinberg' ? floydSteinbergDither : bayerDither;
+          const paletteResult = ditherFn(resizedData, dims.N, dims.M, palette, ditherStrength);
+          resultPixels = paletteResult.map((row) =>
+            row.map((pc) => ({ key: pc.key, color: pc.hex, isExternal: false }))
+          );
+        } else {
+          const fallback = palette[0] || { key: '?', hex: '#FFFFFF', rgb: { r: 255, g: 255, b: 255 } };
+          resultPixels = calculatePixelGrid(
+            sourceImageData, cw, ch,
+            dims.N, dims.M,
+            palette, pixelationMode, fallback
+          );
+        }
+        set({ gridDimensions: dims, pixels: resultPixels });
+      },
 
       // -- UI --
       showImportModal: false,
