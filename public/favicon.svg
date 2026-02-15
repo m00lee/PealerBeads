@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="12" fill="#1e1e2e"/>
+  <g transform="translate(8,8)">
+    <rect x="0" y="0" width="10" height="10" rx="2" fill="#f38ba8"/>
+    <rect x="12" y="0" width="10" height="10" rx="2" fill="#fab387"/>
+    <rect x="24" y="0" width="10" height="10" rx="2" fill="#a6e3a1"/>
+    <rect x="36" y="0" width="10" height="10" rx="2" fill="#89b4fa"/>
+    <rect x="0" y="12" width="10" height="10" rx="2" fill="#f9e2af"/>
+    <rect x="12" y="12" width="10" height="10" rx="2" fill="#cba6f7"/>
+    <rect x="24" y="12" width="10" height="10" rx="2" fill="#94e2d5"/>
+    <rect x="36" y="12" width="10" height="10" rx="2" fill="#f2cdcd"/>
+    <rect x="0" y="24" width="10" height="10" rx="2" fill="#74c7ec"/>
+    <rect x="12" y="24" width="10" height="10" rx="2" fill="#eba0ac"/>
+    <rect x="24" y="24" width="10" height="10" rx="2" fill="#a6e3a1"/>
+    <rect x="36" y="24" width="10" height="10" rx="2" fill="#fab387"/>
+    <rect x="0" y="36" width="10" height="10" rx="2" fill="#89b4fa"/>
+    <rect x="12" y="36" width="10" height="10" rx="2" fill="#f38ba8"/>
+    <rect x="24" y="36" width="10" height="10" rx="2" fill="#f9e2af"/>
+    <rect x="36" y="36" width="10" height="10" rx="2" fill="#cba6f7"/>
+  </g>
+</svg>
