@@ -538,6 +538,9 @@ function drawSquareGrid(
     }
   }
 
+  // Rounded corner radius for pixel blocks
+  const cornerR = cellSize * 0.15;
+
   // Draw cells / beads
   for (let j = 0; j < M; j++) {
     for (let i = 0; i < N; i++) {
@@ -551,7 +554,7 @@ function drawSquareGrid(
           drawBead(ctx, cx, cy, cellSize / 2, cell.color);
         }
       } else {
-        // Standard flat rendering
+        // Standard flat rendering with rounded corners
         if (previewMode === 'gridOnly') {
           ctx.fillStyle = '#1e1e2e';
         } else if (cell && !cell.isExternal && cell.key !== TRANSPARENT_KEY) {
@@ -560,31 +563,89 @@ function drawSquareGrid(
           const isEven = (i + j) % 2 === 0;
           ctx.fillStyle = isEven ? '#2a2a3c' : '#252536';
         }
-        ctx.fillRect(i * cellSize, j * cellSize, cellSize, cellSize);
+        const x = i * cellSize;
+        const y = j * cellSize;
+        const gap = cellSize * 0.06; // small gap between rounded blocks
+        ctx.beginPath();
+        ctx.roundRect(x + gap, y + gap, cellSize - gap * 2, cellSize - gap * 2, cornerR);
+        ctx.fill();
       }
     }
   }
 
   // Draw grid lines (skip for bead view — beads have their own outlines)
   if (showGrid && !isBeadView) {
+    // Helper: parse hex "#RRGGBB" → {r,g,b}
+    const parseHex = (hex: string) => {
+      const h = hex.replace('#', '');
+      return {
+        r: parseInt(h.substring(0, 2), 16) || 0,
+        g: parseInt(h.substring(2, 4), 16) || 0,
+        b: parseInt(h.substring(4, 6), 16) || 0,
+      };
+    };
+    // Get cell color or default dark background
+    const cellRgb = (r: number, c: number) => {
+      const px = pixels[r]?.[c];
+      if (px && !px.isExternal && px.key !== TRANSPARENT_KEY) return parseHex(px.color);
+      return { r: 37, g: 37, b: 54 }; // #252536 default bg
+    };
+    // Invert of average → bold line color
+    const invertAvg = (a: {r:number;g:number;b:number}, b: {r:number;g:number;b:number}) => {
+      const mr = 255 - Math.round((a.r + b.r) / 2);
+      const mg = 255 - Math.round((a.g + b.g) / 2);
+      const mb = 255 - Math.round((a.b + b.b) / 2);
+      return `rgb(${mr},${mg},${mb})`;
+    };
+
+    // Normal (non-bold) grid lines
+    ctx.strokeStyle = 'rgba(205, 214, 244, 0.08)';
+    ctx.lineWidth = 0.5;
     for (let i = 0; i <= N; i++) {
-      const isBold = i % boldEvery === 0;
-      ctx.strokeStyle = isBold ? 'rgba(205, 214, 244, 0.3)' : 'rgba(205, 214, 244, 0.08)';
-      ctx.lineWidth = isBold ? 1.5 : 0.5;
+      if (i % boldEvery === 0) continue;
       ctx.beginPath();
       ctx.moveTo(i * cellSize, 0);
       ctx.lineTo(i * cellSize, M * cellSize);
       ctx.stroke();
     }
     for (let j = 0; j <= M; j++) {
-      const isBold = j % boldEvery === 0;
-      ctx.strokeStyle = isBold ? 'rgba(205, 214, 244, 0.3)' : 'rgba(205, 214, 244, 0.08)';
-      ctx.lineWidth = isBold ? 1.5 : 0.5;
+      if (j % boldEvery === 0) continue;
       ctx.beginPath();
       ctx.moveTo(0, j * cellSize);
       ctx.lineTo(N * cellSize, j * cellSize);
       ctx.stroke();
     }
+
+    // Bold grid lines — color derived from adjacent cells
+    ctx.lineWidth = 1.5;
+    for (let i = 0; i <= N; i++) {
+      if (i % boldEvery !== 0) continue;
+      // Draw segments per row so each segment can have its own color
+      for (let j = 0; j < M; j++) {
+        const left = cellRgb(j, Math.max(0, i - 1));
+        const right = cellRgb(j, Math.min(N - 1, i));
+        ctx.strokeStyle = invertAvg(left, right);
+        ctx.globalAlpha = 0.7;
+        ctx.beginPath();
+        ctx.moveTo(i * cellSize, j * cellSize);
+        ctx.lineTo(i * cellSize, (j + 1) * cellSize);
+        ctx.stroke();
+      }
+    }
+    for (let j = 0; j <= M; j++) {
+      if (j % boldEvery !== 0) continue;
+      for (let i = 0; i < N; i++) {
+        const top = cellRgb(Math.max(0, j - 1), i);
+        const bottom = cellRgb(Math.min(M - 1, j), i);
+        ctx.strokeStyle = invertAvg(top, bottom);
+        ctx.globalAlpha = 0.7;
+        ctx.beginPath();
+        ctx.moveTo(i * cellSize, j * cellSize);
+        ctx.lineTo((i + 1) * cellSize, j * cellSize);
+        ctx.stroke();
+      }
+    }
+    ctx.globalAlpha = 1;
   }
 }
 

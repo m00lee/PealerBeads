@@ -67,30 +67,36 @@ export function ColorPalette() {
       </div>
 
       {/* Colors Grid */}
-      <div className="grid grid-cols-7 gap-0.5">
+      <div className="grid grid-cols-7 gap-1">
         {displayed.map((c) => {
           const isSelected = selectedColor?.hex === c.hex;
           const isLocked = lockedColors.has(c.hex);
           return (
-            <button
-              key={c.hex}
-              className={`relative aspect-square rounded-sm border transition-all ${
-                isSelected
-                  ? 'border-accent ring-1 ring-accent scale-110 z-10'
-                  : 'border-transparent hover:border-text-dim'
-              }`}
-              style={{ backgroundColor: c.hex }}
-              onClick={() => setSelectedColor(c)}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                toggleColorLock(c.hex);
-              }}
-              title={`${c.key} (${c.hex})${isLocked ? ' 🔒' : ''}`}
-            >
-              {isLocked && (
-                <Lock size={8} className="absolute top-0 right-0 text-white drop-shadow" />
-              )}
-            </button>
+            <div key={c.hex} className="relative group">
+              <button
+                className={`relative w-full aspect-square rounded-md border-2 transition-all duration-150 ${
+                  isSelected
+                    ? 'border-accent ring-2 ring-accent/50 scale-110 z-10'
+                    : 'border-transparent hover:border-white/40 hover:scale-105'
+                }`}
+                style={{ backgroundColor: c.hex }}
+                onClick={() => setSelectedColor(c)}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  toggleColorLock(c.hex);
+                }}
+              >
+                {isLocked && (
+                  <Lock size={8} className="absolute top-0 right-0 text-white drop-shadow" />
+                )}
+              </button>
+              {/* Hover tooltip */}
+              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 px-2 py-1 bg-surface-light border border-surface-lighter rounded shadow-lg text-[10px] whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50">
+                <div className="font-medium text-text">{c.key}</div>
+                <div className="text-text-dim font-mono">{c.hex}</div>
+                {isLocked && <div className="text-amber-400">🔒 已锁定</div>}
+              </div>
+            </div>
           );
         })}
       </div>
