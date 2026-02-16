@@ -32,6 +32,8 @@ export async function aiRemoveBackground(
   onProgress?: (progress: number) => void,
 ): Promise<ImageData> {
   const blob = await removeBackground(imageSource, {
+    publicPath: `${window.location.origin}/bg-removal-data/`,
+    model: 'isnet_quint8',
     progress: (key: string, current: number, total: number) => {
       if (onProgress && total > 0) {
         onProgress(current / total);
