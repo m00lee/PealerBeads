@@ -9,6 +9,10 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  // @imgly/background-removal uses ONNX Runtime WASM
+  optimizeDeps: {
+    exclude: ['@imgly/background-removal'],
+  },
   // Tauri expects a fixed port
   server: {
     port: 1421,
