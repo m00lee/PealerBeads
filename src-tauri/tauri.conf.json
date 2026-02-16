@@ -1,6 +1,6 @@
 {
   "productName": "PealerBeads",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "identifier": "com.pealerbeads.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
