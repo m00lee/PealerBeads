@@ -8,7 +8,10 @@ import { ImageImportModal } from '@/components/ImageImport/ImageImportModal';
 import { StatusBar } from '@/components/StatusBar';
 import { BoardExportPanel } from '@/components/Export/BoardExportPanel';
 import { ColorOptimizePanel } from '@/components/Palette/ColorOptimizePanel';
+import { UnsavedDialog } from '@/components/UnsavedDialog';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
+import { useAutoSave, useDirtyTracking } from '@/hooks/useAutoSave';
+import { useWindowTitle } from '@/hooks/useWindowTitle';
 
 // Lazy load 3D preview (Three.js is large)
 const Preview3D = lazy(() =>
@@ -17,6 +20,10 @@ const Preview3D = lazy(() =>
 
 export default function App() {
   useKeyboardShortcuts();
+  useAutoSave();
+  useDirtyTracking();
+  useWindowTitle();
+
   const showImportModal = useStore((s) => s.showImportModal);
   const pixels = useStore((s) => s.pixels);
   const dims = useStore((s) => s.gridDimensions);
@@ -66,6 +73,9 @@ export default function App() {
       )}
       {showBoardExport && <BoardExportPanel onClose={() => setShowBoardExport(false)} />}
       {showColorOptimize && <ColorOptimizePanel onClose={() => setShowColorOptimize(false)} />}
+
+      {/* Unsaved Changes Dialog */}
+      <UnsavedDialog />
     </div>
   );
 }

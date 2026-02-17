@@ -1,8 +1,13 @@
 import { useStore } from '@/store/useStore';
 
 export function StatusBar() {
-  const { gridDimensions: dims, activeTool, zoom, selectedColor, gridType } = useStore();
-  const hoverInfo = ''; // Could be extended with hover cell coords
+  const { gridDimensions: dims, activeTool, zoom, selectedColor, gridType, canvasMode, selection, floatingSelection } = useStore();
+
+  const selectionInfo = selection && selection.cells.size > 0
+    ? `选区: ${selection.cells.size}格 [${selection.bounds.minCol},${selection.bounds.minRow} → ${selection.bounds.maxCol},${selection.bounds.maxRow}]`
+    : floatingSelection
+    ? `浮动选区: ${floatingSelection.width}×${floatingSelection.height} @ (${floatingSelection.offsetCol},${floatingSelection.offsetRow})`
+    : null;
 
   return (
     <div className="h-6 bg-surface-light border-t border-surface-lighter flex items-center px-3 gap-4 text-[10px] text-text-dim shrink-0">
@@ -25,8 +30,14 @@ export function StatusBar() {
           {selectedColor.key}
         </span>
       )}
+      {selectionInfo && (
+        <span className="text-accent">{selectionInfo}</span>
+      )}
       <div className="flex-1" />
-      <span>PealerBeads v0.1.0</span>
+      {canvasMode === 'infinite' && (
+        <span className="text-accent">∞ 无尽图纸</span>
+      )}
+      <span>PealerBeads v0.3.0</span>
     </div>
   );
 }

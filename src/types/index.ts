@@ -90,7 +90,47 @@ export type ToolType =
   | 'rect'
   | 'circle';
 
+// ---- Selection ----
+
+export type SelectionMode = 'rect' | 'lasso';
+
+export interface SelectionBounds {
+  minRow: number;
+  maxRow: number;
+  minCol: number;
+  maxCol: number;
+}
+
+export interface Selection {
+  /** Set of "row,col" strings for O(1) lookup */
+  cells: Set<string>;
+  bounds: SelectionBounds;
+}
+
+/** Pixels stored on the clipboard (relative to bounds origin) */
+export interface ClipboardData {
+  /** 2D array [row][col] relative to bounds, null = transparent/empty */
+  pixels: (MappedPixel | null)[][];
+  width: number;
+  height: number;
+}
+
+/** Floating selection during move/paste — rendered on interaction layer */
+export interface FloatingSelection {
+  /** 2D pixels array (height × width) */
+  pixels: (MappedPixel | null)[][];
+  width: number;
+  height: number;
+  /** Top-left position on the grid */
+  offsetRow: number;
+  offsetCol: number;
+}
+
 export type SymmetryMode = 'none' | 'horizontal' | 'vertical' | 'both';
+
+// ---- Canvas Mode ----
+
+export type CanvasMode = 'fixed' | 'infinite';
 
 // ---- Preview ----
 

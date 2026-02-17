@@ -123,6 +123,9 @@ export function ImageImportModal() {
     setPixels,
     setSourceImage,
     setSourceImageData,
+    canvasMode,
+    ensureGridSize,
+    pixels: currentGridPixels,
   } = useStore();
 
   const [image, setImage] = useState<HTMLImageElement | null>(null);
@@ -553,7 +556,30 @@ export function ImageImportModal() {
           }
         }
 
-        setPixels(resultPixels);
+        // In infinite canvas mode: place imported image at top-left, preserving existing content
+        if (canvasMode === 'infinite') {
+          const importH = resultPixels.length;
+          const importW = importH > 0 ? resultPixels[0].length : 0;
+          // Ensure grid is large enough
+          ensureGridSize(importW, importH);
+          // Get the (possibly expanded) current grid
+          const basePixels = useStore.getState().pixels;
+          const mergedPixels = basePixels.map((row) => [...row]);
+          // Overlay imported pixels at top-left (0,0)
+          for (let r = 0; r < importH; r++) {
+            for (let c = 0; c < importW; c++) {
+              const px = resultPixels[r]?.[c];
+              if (px && !px.isExternal && px.key !== TRANSPARENT_KEY) {
+                if (mergedPixels[r]?.[c]) {
+                  mergedPixels[r][c] = { ...px };
+                }
+              }
+            }
+          }
+          setPixels(mergedPixels);
+        } else {
+          setPixels(resultPixels);
+        }
         setSourceImage(image);
         setSourceImageData(imageData);
         setShowImportModal(false);
@@ -564,7 +590,7 @@ export function ImageImportModal() {
         setLoading(false);
       }
     });
-  }, [image, rotation, flipH, flipV, cropRect, brightness, contrast, saturation, hueRotate, grayscale, dims, palette, pixelationMode, ditherAlgorithm, ditherStrength, cutoutMode, cutoutImageData, cutoutMask, setPixels, setSourceImage, setSourceImageData, setShowImportModal]);
+  }, [image, rotation, flipH, flipV, cropRect, brightness, contrast, saturation, hueRotate, grayscale, dims, palette, pixelationMode, ditherAlgorithm, ditherStrength, cutoutMode, cutoutImageData, cutoutMask, setPixels, setSourceImage, setSourceImageData, setShowImportModal, canvasMode, ensureGridSize, currentGridPixels]);
 
   // CSS filter preview string
   const filterStyle = [

@@ -2,7 +2,25 @@ import { useRef, useEffect, useCallback, useState, useMemo } from 'react';
 import { useStore } from '@/store/useStore';
 import { TRANSPARENT_KEY, floodFill, paintPixel, floodFillErase, linePixels, rectPixels, circlePixels, paintCells } from '@/lib/pixelEditing';
 import { drawHexPath, hexCellCenter, drawBead } from '@/lib/canvasUtils';
-import type { MappedPixel, GridDimensions, ToolType } from '@/types';
+import type { MappedPixel, GridDimensions, ToolType, Selection, SelectionMode, FloatingSelection } from '@/types';
+
+/** Ray-casting point-in-polygon test */
+function pointInPolygon(
+  px: number,
+  py: number,
+  polygon: { col: number; row: number }[]
+): boolean {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = polygon[i].col, yi = polygon[i].row;
+    const xj = polygon[j].col, yj = polygon[j].row;
+    const intersect =
+      yi > py !== yj > py &&
+      px < ((xj - xi) * (py - yi)) / (yj - yi) + xi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
 
 /** Multi-layer canvas editor with zoom/pan support */
 export function EditorCanvas() {
@@ -29,6 +47,18 @@ export function EditorCanvas() {
     setPixels,
     setSelectedColor,
     palette,
+    // Selection
+    selection,
+    selectionMode,
+    setSelection,
+    floatingSelection,
+    setFloatingSelection,
+    commitFloating,
+    liftSelection,
+    moveSelectionBy,
+    // Canvas mode
+    canvasMode,
+    ensureGridSize,
   } = useStore();
 
   const [hoverCell, setHoverCell] = useState<{ col: number; row: number } | null>(null);
@@ -36,6 +66,18 @@ export function EditorCanvas() {
   const [panStart, setPanStart] = useState<{ x: number; y: number } | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [shapeStart, setShapeStart] = useState<{ col: number; row: number } | null>(null);
+
+  // Selection drag state
+  const [selectStart, setSelectStart] = useState<{ col: number; row: number } | null>(null);
+  const [selectEnd, setSelectEnd] = useState<{ col: number; row: number } | null>(null);
+  const [lassoPoints, setLassoPoints] = useState<{ col: number; row: number }[]>([]);
+  const [isSelectDragging, setIsSelectDragging] = useState(false);
+  // Move-selection drag
+  const [isMovingSelection, setIsMovingSelection] = useState(false);
+  const [moveStart, setMoveStart] = useState<{ col: number; row: number } | null>(null);
+  // Floating drag
+  const [isMovingFloating, setIsMovingFloating] = useState(false);
+  const [floatingDragStart, setFloatingDragStart] = useState<{ col: number; row: number } | null>(null);
 
   // Compute cell size from container
   const cellSize = 16; // base cell size in world units
@@ -57,6 +99,30 @@ export function EditorCanvas() {
   symmetryRef.current = symmetry;
   const shapeStartRef = useRef(shapeStart);
   shapeStartRef.current = shapeStart;
+  const selectionRef = useRef(selection);
+  selectionRef.current = selection;
+  const selectionModeRef = useRef(selectionMode);
+  selectionModeRef.current = selectionMode;
+  const selectStartRef = useRef(selectStart);
+  selectStartRef.current = selectStart;
+  const selectEndRef = useRef(selectEnd);
+  selectEndRef.current = selectEnd;
+  const lassoPointsRef = useRef(lassoPoints);
+  lassoPointsRef.current = lassoPoints;
+  const isSelectDraggingRef = useRef(isSelectDragging);
+  isSelectDraggingRef.current = isSelectDragging;
+  const isMovingSelectionRef = useRef(isMovingSelection);
+  isMovingSelectionRef.current = isMovingSelection;
+  const moveStartRef = useRef(moveStart);
+  moveStartRef.current = moveStart;
+  const floatingSelectionRef = useRef(floatingSelection);
+  floatingSelectionRef.current = floatingSelection;
+  const isMovingFloatingRef = useRef(isMovingFloating);
+  isMovingFloatingRef.current = isMovingFloating;
+  const floatingDragStartRef = useRef(floatingDragStart);
+  floatingDragStartRef.current = floatingDragStart;
+  const canvasModeRef = useRef(canvasMode);
+  canvasModeRef.current = canvasMode;
 
   // ---- Draw the static grid layer ----
   const drawGrid = useCallback(() => {
@@ -121,16 +187,109 @@ export function EditorCanvas() {
 
     ctx.clearRect(0, 0, cw, ch);
 
-    if (!hoverCell) return;
-
     const currentZoom = zoomRef.current;
     const currentPanOffset = panOffsetRef.current;
-    const currentTool = activeToolRef.current;
-    const currentBrushSize = brushSizeRef.current;
 
     ctx.save();
     ctx.translate(currentPanOffset.x, currentPanOffset.y);
     ctx.scale(currentZoom, currentZoom);
+
+    // ---- Draw confirmed selection overlay ----
+    if (selection && selection.cells.size > 0) {
+      ctx.fillStyle = 'rgba(137, 180, 250, 0.15)';
+      ctx.strokeStyle = 'rgba(137, 180, 250, 0.6)';
+      ctx.lineWidth = 1.5 / currentZoom;
+      for (const cellKey of selection.cells) {
+        const [rs, cs] = cellKey.split(',');
+        const r = parseInt(rs), c = parseInt(cs);
+        ctx.fillRect(c * cellSize, r * cellSize, cellSize, cellSize);
+      }
+      // Draw marching-ants border around selection bounds
+      const { minRow, maxRow, minCol, maxCol } = selection.bounds;
+      ctx.setLineDash([4 / currentZoom, 4 / currentZoom]);
+      ctx.strokeRect(
+        minCol * cellSize,
+        minRow * cellSize,
+        (maxCol - minCol + 1) * cellSize,
+        (maxRow - minRow + 1) * cellSize
+      );
+      ctx.setLineDash([]);
+    }
+
+    // ---- Draw selection rectangle preview during drag ----
+    if (isSelectDragging && selectStart && selectEnd && selectionMode === 'rect') {
+      const minC = Math.min(selectStart.col, selectEnd.col);
+      const maxC = Math.max(selectStart.col, selectEnd.col);
+      const minR = Math.min(selectStart.row, selectEnd.row);
+      const maxR = Math.max(selectStart.row, selectEnd.row);
+      ctx.fillStyle = 'rgba(137, 180, 250, 0.1)';
+      ctx.fillRect(minC * cellSize, minR * cellSize, (maxC - minC + 1) * cellSize, (maxR - minR + 1) * cellSize);
+      ctx.strokeStyle = 'rgba(137, 180, 250, 0.7)';
+      ctx.lineWidth = 1.5 / currentZoom;
+      ctx.setLineDash([4 / currentZoom, 4 / currentZoom]);
+      ctx.strokeRect(minC * cellSize, minR * cellSize, (maxC - minC + 1) * cellSize, (maxR - minR + 1) * cellSize);
+      ctx.setLineDash([]);
+    }
+
+    // ---- Draw lasso path during drag ----
+    if (isSelectDragging && lassoPoints.length > 1 && selectionMode === 'lasso') {
+      ctx.beginPath();
+      ctx.moveTo(lassoPoints[0].col * cellSize + cellSize / 2, lassoPoints[0].row * cellSize + cellSize / 2);
+      for (let i = 1; i < lassoPoints.length; i++) {
+        ctx.lineTo(lassoPoints[i].col * cellSize + cellSize / 2, lassoPoints[i].row * cellSize + cellSize / 2);
+      }
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(137, 180, 250, 0.1)';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(137, 180, 250, 0.7)';
+      ctx.lineWidth = 1.5 / currentZoom;
+      ctx.setLineDash([4 / currentZoom, 4 / currentZoom]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // ---- Draw floating selection ----
+    if (floatingSelection) {
+      const { pixels: fPx, offsetRow, offsetCol, width, height } = floatingSelection;
+      // Semi-transparent background
+      ctx.fillStyle = 'rgba(137, 180, 250, 0.08)';
+      ctx.fillRect(offsetCol * cellSize, offsetRow * cellSize, width * cellSize, height * cellSize);
+      // Draw pixels
+      for (let r = 0; r < height; r++) {
+        for (let c = 0; c < width; c++) {
+          const px = fPx[r]?.[c];
+          if (px && !px.isExternal && px.key !== TRANSPARENT_KEY) {
+            ctx.fillStyle = px.color;
+            const gap = cellSize * 0.06;
+            const cornerR = cellSize * 0.15;
+            ctx.beginPath();
+            ctx.roundRect(
+              (offsetCol + c) * cellSize + gap,
+              (offsetRow + r) * cellSize + gap,
+              cellSize - gap * 2,
+              cellSize - gap * 2,
+              cornerR
+            );
+            ctx.fill();
+          }
+        }
+      }
+      // Border
+      ctx.strokeStyle = 'rgba(250, 179, 135, 0.8)';
+      ctx.lineWidth = 2 / currentZoom;
+      ctx.setLineDash([6 / currentZoom, 3 / currentZoom]);
+      ctx.strokeRect(offsetCol * cellSize, offsetRow * cellSize, width * cellSize, height * cellSize);
+      ctx.setLineDash([]);
+    }
+
+    // ---- Hover + brush/shape preview ----
+    if (!hoverCell) {
+      ctx.restore();
+      return;
+    }
+
+    const currentTool = activeToolRef.current;
+    const currentBrushSize = brushSizeRef.current;
 
     const { col, row } = hoverCell;
 
@@ -187,7 +346,7 @@ export function EditorCanvas() {
     }
 
     ctx.restore();
-  }, [hoverCell, dims, gridType, cellSize]);
+  }, [hoverCell, dims, gridType, cellSize, selection, isSelectDragging, selectStart, selectEnd, selectionMode, lassoPoints, floatingSelection]);
 
   // ---- Effects to redraw ----
   useEffect(() => { drawGrid(); }, [drawGrid]);
@@ -224,6 +383,10 @@ export function EditorCanvas() {
         if (col >= 0 && col < dims.N && row >= 0 && row < dims.M) {
           return { col, row };
         }
+        // In infinite mode, allow out-of-bounds positive coords
+        if (canvasModeRef.current === 'infinite' && col >= 0 && row >= 0) {
+          return { col, row };
+        }
       } else {
         // Hex approximate hit test
         const hexR = cellSize * 0.6;
@@ -249,6 +412,15 @@ export function EditorCanvas() {
       const currentSelectedColor = selectedColorRef.current;
       const currentBrushSize = brushSizeRef.current;
       const currentSymmetry = symmetryRef.current;
+
+      // In infinite mode, auto-expand if needed
+      if (canvasModeRef.current === 'infinite') {
+        const neededN = col + currentBrushSize + 1;
+        const neededM = row + currentBrushSize + 1;
+        if (neededN > dims.N || neededM > dims.M) {
+          ensureGridSize(Math.max(dims.N, neededN), Math.max(dims.M, neededM));
+        }
+      }
 
       if (tool === 'pencil' && currentSelectedColor) {
         const value: MappedPixel = { key: currentSelectedColor.key, color: currentSelectedColor.hex, isExternal: false };
@@ -320,7 +492,7 @@ export function EditorCanvas() {
         }
       }
     },
-    [dims, setPixels, palette, setSelectedColor]
+    [dims, setPixels, palette, setSelectedColor, ensureGridSize]
   );
 
   // ---- Mouse handlers (stable using refs) ----
@@ -344,6 +516,52 @@ export function EditorCanvas() {
 
       if (e.button === 0) {
         const cell = getGridCell(e.clientX, e.clientY);
+
+        // Handle select tool
+        if (currentTool === 'select' && cell) {
+          // If there's a floating selection, check if click is inside it → start moving the floating
+          const currentFloating = floatingSelectionRef.current;
+          if (currentFloating) {
+            const { offsetRow, offsetCol, width, height } = currentFloating;
+            if (
+              cell.row >= offsetRow && cell.row < offsetRow + height &&
+              cell.col >= offsetCol && cell.col < offsetCol + width
+            ) {
+              setIsMovingFloating(true);
+              setFloatingDragStart(cell);
+              return;
+            } else {
+              // Click outside → commit floating
+              commitFloating();
+            }
+          }
+
+          // If there's an existing selection, check if click is inside → start moving
+          const currentSelection = selectionRef.current;
+          if (currentSelection && currentSelection.cells.size > 0) {
+            const key = `${cell.row},${cell.col}`;
+            if (currentSelection.cells.has(key)) {
+              // Start moving the selection
+              setIsMovingSelection(true);
+              setMoveStart(cell);
+              liftSelection();
+              return;
+            }
+          }
+
+          // Otherwise, start new selection drag
+          const mode = selectionModeRef.current;
+          if (mode === 'rect') {
+            setSelectStart(cell);
+            setSelectEnd(cell);
+          } else if (mode === 'lasso') {
+            setLassoPoints([cell]);
+          }
+          setIsSelectDragging(true);
+          setSelection(null);
+          return;
+        }
+
         if (cell) {
           // Shape tools: record start point, don't draw yet
           if (currentTool === 'line' || currentTool === 'rect' || currentTool === 'circle') {
@@ -359,7 +577,7 @@ export function EditorCanvas() {
         }
       }
     },
-    [getGridCell, applyTool]
+    [getGridCell, applyTool, setSelection, commitFloating, liftSelection]
   );
 
   const handleMouseMove = useCallback(
@@ -374,17 +592,149 @@ export function EditorCanvas() {
       setHoverCell(cell);
 
       const currentTool = activeToolRef.current;
+
+      // Selection drag
+      if (currentTool === 'select') {
+        // Moving floating
+        if (isMovingFloatingRef.current && floatingDragStartRef.current && cell) {
+          const currentFloating = floatingSelectionRef.current;
+          if (currentFloating) {
+            const dCol = cell.col - floatingDragStartRef.current.col;
+            const dRow = cell.row - floatingDragStartRef.current.row;
+            if (dCol !== 0 || dRow !== 0) {
+              setFloatingSelection({
+                ...currentFloating,
+                offsetCol: currentFloating.offsetCol + dCol,
+                offsetRow: currentFloating.offsetRow + dRow,
+              });
+              setFloatingDragStart(cell);
+            }
+          }
+          return;
+        }
+
+        // Moving selection (now floating)
+        if (isMovingSelectionRef.current && moveStartRef.current && cell) {
+          const currentFloating = floatingSelectionRef.current;
+          if (currentFloating) {
+            const dCol = cell.col - moveStartRef.current.col;
+            const dRow = cell.row - moveStartRef.current.row;
+            if (dCol !== 0 || dRow !== 0) {
+              setFloatingSelection({
+                ...currentFloating,
+                offsetCol: currentFloating.offsetCol + dCol,
+                offsetRow: currentFloating.offsetRow + dRow,
+              });
+              setMoveStart(cell);
+            }
+          }
+          return;
+        }
+
+        if (isSelectDraggingRef.current && cell) {
+          const mode = selectionModeRef.current;
+          if (mode === 'rect') {
+            setSelectEnd(cell);
+          } else if (mode === 'lasso') {
+            setLassoPoints((prev) => {
+              const last = prev[prev.length - 1];
+              if (!last || last.col !== cell.col || last.row !== cell.row) {
+                return [...prev, cell];
+              }
+              return prev;
+            });
+          }
+        }
+        return;
+      }
+
       if (isDrawingRef.current && cell && (currentTool === 'pencil' || currentTool === 'eraser')) {
         applyTool(cell.col, cell.row, currentTool);
       }
       // For shape tools, just update hoverCell — the interaction layer will render the preview
     },
-    [getGridCell, applyTool, setPanOffset]
+    [getGridCell, applyTool, setPanOffset, setFloatingSelection]
   );
 
   const handleMouseUp = useCallback((e: React.MouseEvent) => {
-    // Finalize shape drawing
     const currentTool = activeToolRef.current;
+
+    // Finalize selection
+    if (currentTool === 'select') {
+      // Finalize floating drag
+      if (isMovingFloatingRef.current) {
+        setIsMovingFloating(false);
+        setFloatingDragStart(null);
+        return;
+      }
+      // Finalize move
+      if (isMovingSelectionRef.current) {
+        // Commit the floating
+        commitFloating();
+        setIsMovingSelection(false);
+        setMoveStart(null);
+        return;
+      }
+
+      if (isSelectDraggingRef.current) {
+        const mode = selectionModeRef.current;
+        if (mode === 'rect') {
+          const start = selectStartRef.current;
+          const end = selectEndRef.current;
+          if (start && end) {
+            const minC = Math.min(start.col, end.col);
+            const maxC = Math.max(start.col, end.col);
+            const minR = Math.min(start.row, end.row);
+            const maxR = Math.max(start.row, end.row);
+            const cells = new Set<string>();
+            for (let r = minR; r <= maxR; r++) {
+              for (let c = minC; c <= maxC; c++) {
+                cells.add(`${r},${c}`);
+              }
+            }
+            setSelection({
+              cells,
+              bounds: { minRow: minR, maxRow: maxR, minCol: minC, maxCol: maxC },
+            });
+          }
+        } else if (mode === 'lasso') {
+          const points = lassoPointsRef.current;
+          if (points.length > 2) {
+            // Rasterize the lasso polygon to find contained cells
+            const cells = new Set<string>();
+            // Find bounding box
+            let minC = Infinity, maxC = -Infinity, minR = Infinity, maxR = -Infinity;
+            for (const p of points) {
+              if (p.col < minC) minC = p.col;
+              if (p.col > maxC) maxC = p.col;
+              if (p.row < minR) minR = p.row;
+              if (p.row > maxR) maxR = p.row;
+            }
+            // Point-in-polygon test for each cell in bounding box
+            for (let r = minR; r <= maxR; r++) {
+              for (let c = minC; c <= maxC; c++) {
+                if (pointInPolygon(c + 0.5, r + 0.5, points)) {
+                  cells.add(`${r},${c}`);
+                }
+              }
+            }
+            if (cells.size > 0) {
+              setSelection({
+                cells,
+                bounds: { minRow: minR, maxRow: maxR, minCol: minC, maxCol: maxC },
+              });
+            }
+          }
+        }
+        setIsSelectDragging(false);
+        setSelectStart(null);
+        setSelectEnd(null);
+        setLassoPoints([]);
+        return;
+      }
+    }
+
+    // Finalize shape drawing
     const startCell = shapeStartRef.current;
     if (isDrawingRef.current && startCell && (currentTool === 'line' || currentTool === 'rect' || currentTool === 'circle')) {
       const endCell = getGridCell(e.clientX, e.clientY);
@@ -418,7 +768,7 @@ export function EditorCanvas() {
     setPanStart(null);
     setIsDrawing(false);
     setShapeStart(null);
-  }, [getGridCell, dims, setPixels]);
+  }, [getGridCell, dims, setPixels, setSelection, commitFloating]);
 
   const handleWheel = useCallback(
     (e: React.WheelEvent) => {
@@ -456,6 +806,7 @@ export function EditorCanvas() {
       case 'fill': return 'cursor-fill';
       case 'eyedropper': return 'cursor-eyedropper';
       case 'move': return 'cursor-move';
+      case 'select': return 'cursor-crosshair';
       default: return 'cursor-default';
     }
   }, [activeTool]);
@@ -477,6 +828,9 @@ export function EditorCanvas() {
         setIsDrawing(false);
         setShapeStart(null);
         setHoverCell(null);
+        setIsSelectDragging(false);
+        setIsMovingSelection(false);
+        setIsMovingFloating(false);
       }}
       onWheel={handleWheel}
       onContextMenu={(e) => e.preventDefault()}
